@@ -1,0 +1,1073 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "kernelspec": {
+      "display_name": "Python 3",
+      "language": "python",
+      "name": "python3"
+    },
+    "language_info": {
+      "name": "python"
+    },
+    "colab": {
+      "name": "customer_shopping_analysis.ipynb",
+      "provenance": []
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "# Customer Shopping Data Analysis\n",
+        "\n",
+        "Data cleaning, preprocessing, and exploratory data analysis (EDA) using Python.\n",
+        "\n",
+        "## Objective\n",
+        "Explore customer shopping patterns, inspect data quality, and export cleaned and scaled datasets. This notebook performs descriptive analysis; it does not train a predictive model.\n",
+        "\n",
+        "## How to run\n",
+        "1. Open this notebook in **Google Colab**.\n",
+        "2. Run the cells from top to bottom.\n",
+        "3. When prompted, upload **one CSV file** with at least 1,000 rows and 10 columns (the original assignment requirement).\n",
+        "4. Inspect the charts and generated insights. The final cell saves three CSV files and downloads the cleaned dataset.\n",
+        "\n",
+        "**Dependencies:** pandas, NumPy, Matplotlib, Seaborn (0.12 or later), scikit-learn, and IPython. These libraries are normally available in Colab.\n",
+        "\n",
+        "## Dataset\n",
+        "Provide your own customer shopping CSV. Optional shopping-specific plots look for `age`, `category`, `gender`, `purchase_amount` (or a name containing it), and `subscription_status` after column-name cleaning. Add the original dataset source and its sharing terms to your repository README.\n",
+        "\n",
+        "## Interpretation\n",
+        "- Numeric missing values use the median; categorical missing values use the mode. Entirely missing numeric columns use zero as an explicit fallback and are reported.\n",
+        "- IQR capping is applied to numeric columns except identifiers. Review the selected columns: codes, ratings, and discrete values may require different treatment.\n",
+        "- Min–Max scaling and standardization are separate outputs derived from the cleaned dataset.\n",
+        "- Correlations and spending summaries describe the processed data and do not establish causation.\n",
+        "- For future predictive modeling, split the data first and fit preprocessing on the training set only.\n",
+        "\n",
+        "Saved execution outputs have been cleared for a clean upload. Re-run with your CSV to regenerate results.\n"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 1. Import libraries\n",
+        "\n",
+        "Load the analysis and preprocessing libraries.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "import pandas as pd\n",
+        "import numpy as np\n",
+        "import matplotlib.pyplot as plt\n",
+        "import seaborn as sns\n",
+        "\n",
+        "from sklearn.preprocessing import MinMaxScaler, StandardScaler\n",
+        "from IPython.display import display\n",
+        "from google.colab import files\n",
+        "import io\n",
+        "import re\n",
+        "\n",
+        "\n",
+        "sns.set_theme(style=\"whitegrid\")\n",
+        "pd.set_option(\"display.max_columns\", None)\n",
+        "\n",
+        "print(\"Libraries imported successfully.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 2. Upload the dataset\n",
+        "\n",
+        "Upload exactly one CSV so the selected dataset is unambiguous.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "uploaded = files.upload()\n",
+        "\n",
+        "csv_files = [name for name in uploaded if name.lower().endswith(\".csv\")]\n",
+        "\n",
+        "if not csv_files:\n",
+        "    raise ValueError(\"Please upload a CSV dataset.\")\n",
+        "\n",
+        "if len(csv_files) != 1:\n",
+        "    raise ValueError(\"Upload exactly one CSV file per run.\")\n",
+        "\n",
+        "file_name = csv_files[0]\n",
+        "df = pd.read_csv(io.BytesIO(uploaded[file_name]))\n",
+        "\n",
+        "original_row_count, original_column_count = df.shape\n",
+        "\n",
+        "print(\"Dataset loaded successfully.\")\n",
+        "print(\"Dataset name:\", file_name)\n",
+        "print(\"Number of rows:\", df.shape[0])\n",
+        "print(\"Number of columns:\", df.shape[1])\n",
+        "\n",
+        "display(df.head())"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 3. Inspect the raw data\n",
+        "\n",
+        "Validate the assignment size requirement and review columns, types, and summary statistics.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "print(\"Dataset dimensions:\", df.shape)\n",
+        "\n",
+        "if df.shape[0] < 1000 or df.shape[1] < 10:\n",
+        "    raise ValueError(\n",
+        "        \"Dataset must contain at least 1000 rows and 10 columns.\"\n",
+        "    )\n",
+        "\n",
+        "print(\"\\nColumn names:\")\n",
+        "print(df.columns.tolist())\n",
+        "\n",
+        "print(\"\\nDataset information:\")\n",
+        "df.info()\n",
+        "\n",
+        "print(\"\\nStatistical summary:\")\n",
+        "display(df.describe(include=\"all\").T)\n",
+        "\n",
+        "print(\"\\nFirst five rows:\")\n",
+        "display(df.head())"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 4. Standardize column names\n",
+        "\n",
+        "Convert column names to unique, lowercase names with underscores.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "def clean_column_name(column):\n",
+        "    column = str(column).strip().lower()\n",
+        "    column = re.sub(r\"[^a-z0-9]+\", \"_\", column)\n",
+        "    return column.strip(\"_\")\n",
+        "\n",
+        "df.columns = [clean_column_name(col) for col in df.columns]\n",
+        "\n",
+        "# Resolve collisions, including names already ending in numeric suffixes.\n",
+        "new_columns = []\n",
+        "used_columns = set()\n",
+        "for column in df.columns:\n",
+        "    base = column or \"unnamed_column\"\n",
+        "    candidate = base\n",
+        "    suffix = 1\n",
+        "    while candidate in used_columns:\n",
+        "        candidate = f\"{base}_{suffix}\"\n",
+        "        suffix += 1\n",
+        "    new_columns.append(candidate)\n",
+        "    used_columns.add(candidate)\n",
+        "df.columns = new_columns\n",
+        "\n",
+        "print(\"Standardized column names:\")\n",
+        "print(df.columns.tolist())\n"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 5. Assess missing values\n",
+        "\n",
+        "Measure missingness before imputing values.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "missing_summary = pd.DataFrame({\n",
+        "    \"Missing_Count\": df.isnull().sum(),\n",
+        "    \"Missing_Percentage\": (df.isnull().mean() * 100).round(2)\n",
+        "})\n",
+        "\n",
+        "missing_summary = missing_summary.sort_values(\n",
+        "    \"Missing_Count\", ascending=False\n",
+        ")\n",
+        "\n",
+        "display(missing_summary)\n",
+        "\n",
+        "plt.figure(figsize=(12, 5))\n",
+        "missing_summary[\"Missing_Count\"].plot(kind=\"bar\")\n",
+        "plt.title(\"Missing Values by Column\")\n",
+        "plt.xlabel(\"Columns\")\n",
+        "plt.ylabel(\"Number of Missing Values\")\n",
+        "plt.xticks(rotation=75, ha=\"right\")\n",
+        "plt.tight_layout()\n",
+        "plt.show()"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 6. Remove duplicate rows\n",
+        "\n",
+        "Keep one copy of each identical row.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "print(\"Duplicate rows before cleaning:\", df.duplicated().sum())\n",
+        "\n",
+        "df = df.drop_duplicates().copy()\n",
+        "df.reset_index(drop=True, inplace=True)\n",
+        "\n",
+        "print(\"Duplicate rows after cleaning:\", df.duplicated().sum())\n",
+        "print(\"Dataset shape after duplicate removal:\", df.shape)"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 7. Fill missing values\n",
+        "\n",
+        "Use medians for numeric columns and modes for categorical columns.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "numeric_cols = df.select_dtypes(include=np.number).columns.tolist()\n",
+        "categorical_cols = df.select_dtypes(\n",
+        "    include=[\"object\", \"category\", \"string\", \"bool\"]\n",
+        ").columns.tolist()\n",
+        "\n",
+        "# Impute numerical missing values using the median\n",
+        "for col in numeric_cols:\n",
+        "    median_value = df[col].median()\n",
+        "\n",
+        "    if pd.notna(median_value):\n",
+        "        df[col] = df[col].fillna(median_value)\n",
+        "    else:\n",
+        "        print(f\"Warning: {col} is entirely missing; filling with 0. Review before analysis.\")\n",
+        "        df[col] = df[col].fillna(0)\n",
+        "\n",
+        "# Impute categorical missing values using the mode\n",
+        "for col in categorical_cols:\n",
+        "    mode_values = df[col].mode(dropna=True)\n",
+        "\n",
+        "    if not mode_values.empty:\n",
+        "        df[col] = df[col].fillna(mode_values.iloc[0])\n",
+        "    else:\n",
+        "        df[col] = df[col].fillna(\"Unknown\")\n",
+        "\n",
+        "# Handle any remaining missing values in unsupported data types\n",
+        "for col in df.columns:\n",
+        "    if df[col].isnull().any():\n",
+        "        df[col] = df[col].fillna(\"Unknown\")\n",
+        "\n",
+        "print(\"Missing values after imputation:\")\n",
+        "display(df.isnull().sum().to_frame(\"Missing_Count\"))\n",
+        "\n",
+        "print(\"Total remaining missing values:\", df.isnull().sum().sum())"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 8. Detect outliers\n",
+        "\n",
+        "Calculate IQR bounds, excluding numeric identifier columns.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "numeric_cols = df.select_dtypes(include=np.number).columns.tolist()\n",
+        "\n",
+        "# Exclude identifier columns from outlier analysis\n",
+        "id_cols = [\n",
+        "    col for col in numeric_cols\n",
+        "    if col == \"customer_id\" or col.endswith(\"_id\")\n",
+        "]\n",
+        "\n",
+        "outlier_cols = [col for col in numeric_cols if col not in id_cols]\n",
+        "\n",
+        "outlier_results = []\n",
+        "\n",
+        "for col in outlier_cols:\n",
+        "    q1 = df[col].quantile(0.25)\n",
+        "    q3 = df[col].quantile(0.75)\n",
+        "    iqr = q3 - q1\n",
+        "\n",
+        "    lower_bound = q1 - 1.5 * iqr\n",
+        "    upper_bound = q3 + 1.5 * iqr\n",
+        "\n",
+        "    count = ((df[col] < lower_bound) | (df[col] > upper_bound)).sum()\n",
+        "\n",
+        "    outlier_results.append({\n",
+        "        \"Column\": col,\n",
+        "        \"Q1\": q1,\n",
+        "        \"Q3\": q3,\n",
+        "        \"IQR\": iqr,\n",
+        "        \"Lower_Bound\": lower_bound,\n",
+        "        \"Upper_Bound\": upper_bound,\n",
+        "        \"Outlier_Count\": int(count)\n",
+        "    })\n",
+        "\n",
+        "outlier_summary = pd.DataFrame(outlier_results)\n",
+        "display(outlier_summary)"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 9. Visualize outliers before treatment\n",
+        "\n",
+        "Inspect the selected numeric variables before capping.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "for col in outlier_cols:\n",
+        "    plt.figure(figsize=(8, 3))\n",
+        "    sns.boxplot(x=df[col])\n",
+        "    plt.title(f\"Boxplot Before Outlier Treatment: {col}\")\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 10. Cap outliers\n",
+        "\n",
+        "Clip values to their IQR bounds while retaining rows.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "df_clean = df.copy()\n",
+        "outlier_treatment_results = []\n",
+        "\n",
+        "for col in outlier_cols:\n",
+        "    q1 = df_clean[col].quantile(0.25)\n",
+        "    q3 = df_clean[col].quantile(0.75)\n",
+        "    iqr = q3 - q1\n",
+        "\n",
+        "    lower_bound = q1 - 1.5 * iqr\n",
+        "    upper_bound = q3 + 1.5 * iqr\n",
+        "\n",
+        "    before_count = (\n",
+        "        (df_clean[col] < lower_bound) |\n",
+        "        (df_clean[col] > upper_bound)\n",
+        "    ).sum()\n",
+        "\n",
+        "    df_clean[col] = df_clean[col].clip(\n",
+        "        lower=lower_bound,\n",
+        "        upper=upper_bound\n",
+        "    )\n",
+        "\n",
+        "    outlier_treatment_results.append({\n",
+        "        \"Column\": col,\n",
+        "        \"Outliers_Before\": int(before_count),\n",
+        "        \"Values_Capped\": int(before_count),\n",
+        "        \"Lower_Cap\": lower_bound,\n",
+        "        \"Upper_Cap\": upper_bound\n",
+        "    })\n",
+        "\n",
+        "display(pd.DataFrame(outlier_treatment_results))\n",
+        "\n",
+        "print(\"Shape after outlier treatment:\", df_clean.shape)"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 11. Apply Min–Max normalization\n",
+        "\n",
+        "Create a separate normalized copy of the cleaned data.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "df_minmax = df_clean.copy()\n",
+        "\n",
+        "numeric_cols = df_minmax.select_dtypes(include=np.number).columns.tolist()\n",
+        "\n",
+        "id_cols = [\n",
+        "    col for col in numeric_cols\n",
+        "    if col == \"customer_id\" or col.endswith(\"_id\")\n",
+        "]\n",
+        "\n",
+        "scaling_cols = [col for col in numeric_cols if col not in id_cols]\n",
+        "\n",
+        "minmax_scaler = MinMaxScaler()\n",
+        "\n",
+        "if scaling_cols:\n",
+        "    df_minmax[scaling_cols] = minmax_scaler.fit_transform(df_minmax[scaling_cols])\n",
+        "else:\n",
+        "    print(\"No numeric feature columns to normalize.\")\n",
+        "\n",
+        "print(\"Min-Max normalized columns:\")\n",
+        "print(scaling_cols)\n",
+        "\n",
+        "display(df_minmax[scaling_cols].head())\n",
+        "\n",
+        "print(\"\\nMinimum values after scaling:\")\n",
+        "display(df_minmax[scaling_cols].min())\n",
+        "\n",
+        "print(\"\\nMaximum values after scaling:\")\n",
+        "display(df_minmax[scaling_cols].max())"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 12. Apply standardization\n",
+        "\n",
+        "Create a separate standardized copy of the cleaned data.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "df_standardized = df_clean.copy()\n",
+        "\n",
+        "standard_scaler = StandardScaler()\n",
+        "\n",
+        "if scaling_cols:\n",
+        "    df_standardized[scaling_cols] = standard_scaler.fit_transform(df_standardized[scaling_cols])\n",
+        "else:\n",
+        "    print(\"No numeric feature columns to standardize.\")\n",
+        "\n",
+        "print(\"Standardized columns:\")\n",
+        "print(scaling_cols)\n",
+        "\n",
+        "display(df_standardized[scaling_cols].head())\n",
+        "\n",
+        "print(\"\\nMeans after standardization:\")\n",
+        "display(df_standardized[scaling_cols].mean().round(3))\n",
+        "\n",
+        "print(\"\\nStandard deviations after standardization:\")\n",
+        "display(df_standardized[scaling_cols].std(ddof=0).round(3))"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 13. Explore numeric distributions\n",
+        "\n",
+        "Plot histograms for numeric features.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "numeric_cols = df_clean.select_dtypes(include=np.number).columns.tolist()\n",
+        "\n",
+        "plot_cols = [\n",
+        "    col for col in numeric_cols\n",
+        "    if col not in id_cols\n",
+        "]\n",
+        "\n",
+        "if plot_cols:\n",
+        "    df_clean[plot_cols].hist(\n",
+        "        figsize=(15, 10),\n",
+        "        bins=20,\n",
+        "        edgecolor=\"black\"\n",
+        "    )\n",
+        "\n",
+        "    plt.suptitle(\"Univariate Analysis: Numerical Distributions\")\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()\n",
+        "else:\n",
+        "    print(\"No numerical feature columns available.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 14. Explore categorical distributions\n",
+        "\n",
+        "Plot categories with at most 30 unique values.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "categorical_cols = df_clean.select_dtypes(\n",
+        "    include=[\"object\", \"category\", \"string\", \"bool\"]\n",
+        ").columns.tolist()\n",
+        "\n",
+        "for col in categorical_cols:\n",
+        "    if df_clean[col].nunique() <= 30:\n",
+        "        plt.figure(figsize=(10, 4))\n",
+        "\n",
+        "        order = df_clean[col].value_counts().index\n",
+        "\n",
+        "        sns.countplot(\n",
+        "            data=df_clean,\n",
+        "            x=col,\n",
+        "            order=order\n",
+        "        )\n",
+        "\n",
+        "        plt.title(f\"Frequency Distribution: {col}\")\n",
+        "        plt.xlabel(col.replace(\"_\", \" \").title())\n",
+        "        plt.ylabel(\"Count\")\n",
+        "        plt.xticks(rotation=45, ha=\"right\")\n",
+        "        plt.tight_layout()\n",
+        "        plt.show()"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 15. Inspect distributions after cleaning\n",
+        "\n",
+        "Review boxplots after outlier capping.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "for col in plot_cols:\n",
+        "    plt.figure(figsize=(8, 3))\n",
+        "\n",
+        "    sns.boxplot(x=df_clean[col])\n",
+        "\n",
+        "    plt.title(f\"Distribution and Outliers: {col}\")\n",
+        "    plt.xlabel(col.replace(\"_\", \" \").title())\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 16. Compare age and purchase amount\n",
+        "\n",
+        "Skip this chart if the required columns are absent.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "age_col = next(\n",
+        "    (c for c in df_clean.columns if c == \"age\"),\n",
+        "    None\n",
+        ")\n",
+        "\n",
+        "amount_col = next(\n",
+        "    (\n",
+        "        c for c in df_clean.columns\n",
+        "        if \"purchase_amount\" in c or \"purchase_amount_usd\" in c\n",
+        "    ),\n",
+        "    None\n",
+        ")\n",
+        "\n",
+        "if age_col and amount_col:\n",
+        "    plt.figure(figsize=(8, 5))\n",
+        "\n",
+        "    sns.scatterplot(\n",
+        "        data=df_clean,\n",
+        "        x=age_col,\n",
+        "        y=amount_col,\n",
+        "        alpha=0.6\n",
+        "    )\n",
+        "\n",
+        "    plt.title(\"Age vs Purchase Amount\")\n",
+        "    plt.xlabel(\"Age\")\n",
+        "    plt.ylabel(\"Purchase Amount\")\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()\n",
+        "else:\n",
+        "    print(\"Age or purchase amount column was not found.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 17. Compare spending across categories\n",
+        "\n",
+        "Inspect the distribution of cleaned purchase amounts.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "category_col = next(\n",
+        "    (c for c in df_clean.columns if c == \"category\"),\n",
+        "    None\n",
+        ")\n",
+        "\n",
+        "if category_col and amount_col:\n",
+        "    plt.figure(figsize=(10, 5))\n",
+        "\n",
+        "    sns.boxplot(\n",
+        "        data=df_clean,\n",
+        "        x=category_col,\n",
+        "        y=amount_col\n",
+        "    )\n",
+        "\n",
+        "    plt.title(\"Purchase Amount by Product Category\")\n",
+        "    plt.xlabel(\"Product Category\")\n",
+        "    plt.ylabel(\"Purchase Amount\")\n",
+        "    plt.xticks(rotation=30)\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()\n",
+        "else:\n",
+        "    print(\"Category or purchase amount column was not found.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 18. Compare spending by gender\n",
+        "\n",
+        "Summarize cleaned purchase amounts by gender.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "gender_col = next(\n",
+        "    (c for c in df_clean.columns if c == \"gender\"),\n",
+        "    None\n",
+        ")\n",
+        "\n",
+        "if gender_col and amount_col:\n",
+        "    gender_spending = (\n",
+        "        df_clean.groupby(gender_col)[amount_col]\n",
+        "        .agg([\"count\", \"mean\", \"median\", \"sum\"])\n",
+        "        .round(2)\n",
+        "    )\n",
+        "\n",
+        "    display(gender_spending)\n",
+        "\n",
+        "    plt.figure(figsize=(7, 4))\n",
+        "\n",
+        "    sns.barplot(\n",
+        "        data=df_clean,\n",
+        "        x=gender_col,\n",
+        "        y=amount_col,\n",
+        "        estimator=np.mean,\n",
+        "        errorbar=None\n",
+        "    )\n",
+        "\n",
+        "    plt.title(\"Average Purchase Amount by Gender\")\n",
+        "    plt.xlabel(\"Gender\")\n",
+        "    plt.ylabel(\"Average Purchase Amount\")\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()\n",
+        "else:\n",
+        "    print(\"Gender or purchase amount column was not found.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 19. Inspect numeric correlations\n",
+        "\n",
+        "Calculate Pearson correlations for varying numeric features.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "correlation_cols = [\n",
+        "    col for col in plot_cols\n",
+        "    if df_clean[col].nunique() > 1\n",
+        "]\n",
+        "\n",
+        "if len(correlation_cols) >= 2:\n",
+        "    correlation_matrix = df_clean[correlation_cols].corr(\n",
+        "        method=\"pearson\"\n",
+        "    )\n",
+        "\n",
+        "    plt.figure(figsize=(10, 7))\n",
+        "\n",
+        "    sns.heatmap(\n",
+        "        correlation_matrix,\n",
+        "        annot=True,\n",
+        "        cmap=\"coolwarm\",\n",
+        "        fmt=\".2f\",\n",
+        "        center=0\n",
+        "    )\n",
+        "\n",
+        "    plt.title(\"Correlation Heatmap of Numerical Variables\")\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()\n",
+        "\n",
+        "    display(correlation_matrix.round(3))\n",
+        "else:\n",
+        "    print(\"Insufficient varying numerical columns for correlation.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 20. Explore pairs of numeric variables\n",
+        "\n",
+        "Use up to five features and a reproducible sample of at most 1,000 rows.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "pair_cols = [\n",
+        "    col for col in plot_cols\n",
+        "    if df_clean[col].nunique() > 1\n",
+        "][:5]\n",
+        "\n",
+        "if len(pair_cols) >= 2:\n",
+        "    sns.pairplot(\n",
+        "        df_clean[pair_cols].sample(\n",
+        "            n=min(1000, len(df_clean)),\n",
+        "            random_state=42\n",
+        "        ),\n",
+        "        diag_kind=\"hist\",\n",
+        "        corner=True\n",
+        "    )\n",
+        "\n",
+        "    plt.suptitle(\n",
+        "        \"Pair Plot of Selected Numerical Variables\",\n",
+        "        y=1.02\n",
+        "    )\n",
+        "\n",
+        "    plt.show()\n",
+        "else:\n",
+        "    print(\"Insufficient numerical variables for pair plot.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 21. Compare category and gender together\n",
+        "\n",
+        "Plot mean cleaned purchase amounts for available groups.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "if category_col and gender_col and amount_col:\n",
+        "    plt.figure(figsize=(11, 5))\n",
+        "\n",
+        "    sns.barplot(\n",
+        "        data=df_clean,\n",
+        "        x=category_col,\n",
+        "        y=amount_col,\n",
+        "        hue=gender_col,\n",
+        "        estimator=np.mean,\n",
+        "        errorbar=None\n",
+        "    )\n",
+        "\n",
+        "    plt.title(\"Average Purchase Amount by Category and Gender\")\n",
+        "    plt.xlabel(\"Product Category\")\n",
+        "    plt.ylabel(\"Average Purchase Amount\")\n",
+        "    plt.xticks(rotation=30)\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()\n",
+        "else:\n",
+        "    print(\"Required columns for multivariate analysis were not found.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 22. Rank numerical relationships\n",
+        "\n",
+        "List the strongest absolute pairwise correlations.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "if len(correlation_cols) >= 2:\n",
+        "    corr = df_clean[correlation_cols].corr()\n",
+        "\n",
+        "    # Extract unique pairs, excluding self-correlations\n",
+        "    upper_triangle = corr.where(\n",
+        "        np.triu(np.ones(corr.shape), k=1).astype(bool)\n",
+        "    )\n",
+        "\n",
+        "    strongest_pairs = (\n",
+        "        upper_triangle.stack()\n",
+        "        .rename(\"Correlation\")\n",
+        "        .reset_index()\n",
+        "        .rename(columns={\n",
+        "            \"level_0\": \"Variable_1\",\n",
+        "            \"level_1\": \"Variable_2\"\n",
+        "        })\n",
+        "    )\n",
+        "\n",
+        "    strongest_pairs[\"Absolute_Correlation\"] = (\n",
+        "        strongest_pairs[\"Correlation\"].abs()\n",
+        "    )\n",
+        "\n",
+        "    strongest_pairs = strongest_pairs.sort_values(\n",
+        "        \"Absolute_Correlation\",\n",
+        "        ascending=False\n",
+        "    )\n",
+        "\n",
+        "    print(\"Strongest numerical relationships:\")\n",
+        "    display(strongest_pairs.head(10))\n",
+        "else:\n",
+        "    print(\"Insufficient numerical variables for correlation analysis.\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 23. Generate descriptive insights\n",
+        "\n",
+        "Summarize the processed dataset without implying causation.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "insights = []\n",
+        "\n",
+        "# Insight 1: Most frequently purchased category\n",
+        "if category_col:\n",
+        "    category_counts = df_clean[category_col].value_counts()\n",
+        "\n",
+        "    if not category_counts.empty:\n",
+        "        insights.append(\n",
+        "            f\"Most frequent category: {category_counts.index[0]} \"\n",
+        "            f\"({category_counts.iloc[0]} records).\"\n",
+        "        )\n",
+        "\n",
+        "# Insight 2: Highest average spending category\n",
+        "if category_col and amount_col:\n",
+        "    category_means = df_clean.groupby(category_col)[amount_col].mean()\n",
+        "\n",
+        "    if not category_means.empty:\n",
+        "        best_category = category_means.idxmax()\n",
+        "\n",
+        "        insights.append(\n",
+        "            f\"Highest average purchase amount by category: \"\n",
+        "            f\"{best_category} ({category_means.max():.2f}).\"\n",
+        "        )\n",
+        "\n",
+        "# Insight 3: Gender with highest average purchase amount\n",
+        "if gender_col and amount_col:\n",
+        "    gender_means = df_clean.groupby(gender_col)[amount_col].mean()\n",
+        "\n",
+        "    if not gender_means.empty:\n",
+        "        top_gender = gender_means.idxmax()\n",
+        "\n",
+        "        insights.append(\n",
+        "            f\"Highest average purchase amount by gender: \"\n",
+        "            f\"{top_gender} ({gender_means.max():.2f}).\"\n",
+        "        )\n",
+        "\n",
+        "# Insight 4: Strongest numerical correlation\n",
+        "if len(correlation_cols) >= 2:\n",
+        "    corr = df_clean[correlation_cols].corr()\n",
+        "\n",
+        "    upper_triangle = corr.where(\n",
+        "        np.triu(np.ones(corr.shape), k=1).astype(bool)\n",
+        "    )\n",
+        "\n",
+        "    pairs = upper_triangle.stack()\n",
+        "\n",
+        "    if not pairs.empty:\n",
+        "        strongest_pair = pairs.abs().idxmax()\n",
+        "        value = pairs.loc[strongest_pair]\n",
+        "\n",
+        "        insights.append(\n",
+        "            f\"Strongest absolute numerical correlation: \"\n",
+        "            f\"{strongest_pair[0]} and {strongest_pair[1]} \"\n",
+        "            f\"(r = {value:.3f}). Correlation does not establish causation.\"\n",
+        "        )\n",
+        "\n",
+        "# Insight 5: Subscription share, if available\n",
+        "subscription_col = next(\n",
+        "    (c for c in df_clean.columns if \"subscription_status\" in c),\n",
+        "    None\n",
+        ")\n",
+        "\n",
+        "if subscription_col:\n",
+        "    subscription_share = (\n",
+        "        df_clean[subscription_col]\n",
+        "        .astype(str)\n",
+        "        .str.strip()\n",
+        "        .str.lower()\n",
+        "        .eq(\"yes\")\n",
+        "        .mean() * 100\n",
+        "    )\n",
+        "\n",
+        "    insights.append(\n",
+        "        f\"Records marked as subscribed: {subscription_share:.2f}%.\"\n",
+        "    )\n",
+        "\n",
+        "print(\"KEY INSIGHTS FROM THE ACTUAL DATA\\n\")\n",
+        "\n",
+        "for i, insight in enumerate(insights[:5], start=1):\n",
+        "    print(f\"{i}. {insight}\")"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 24. Review the data quality report\n",
+        "\n",
+        "Compare original and cleaned row counts and inspect the resulting schema.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "print(\"FINAL DATA QUALITY REPORT\")\n",
+        "print(\"-\" * 40)\n",
+        "\n",
+        "print(\"Original dataset rows:\", original_row_count)\n",
+        "print(\"Duplicate rows removed:\", original_row_count - len(df))\n",
+        "print(\"Cleaned dataset rows:\", len(df_clean))\n",
+        "print(\"Cleaned dataset columns:\", len(df_clean.columns))\n",
+        "print(\"Remaining duplicate rows:\", df_clean.duplicated().sum())\n",
+        "print(\"Remaining missing values:\", df_clean.isnull().sum().sum())\n",
+        "\n",
+        "print(\"\\nFinal column data types:\")\n",
+        "display(df_clean.dtypes.to_frame(\"Data_Type\"))\n",
+        "\n",
+        "print(\"\\nFinal statistical summary:\")\n",
+        "display(df_clean.describe(include=\"all\").T)"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 25. Export processed datasets\n",
+        "\n",
+        "Save the cleaned, normalized, and standardized CSV files. Colab downloads the cleaned CSV; the other two remain in its Files panel.\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "df_clean.to_csv(\"customer_shopping_cleaned.csv\", index=False)\n",
+        "df_minmax.to_csv(\"customer_shopping_minmax_scaled.csv\", index=False)\n",
+        "df_standardized.to_csv(\n",
+        "    \"customer_shopping_standardized.csv\",\n",
+        "    index=False\n",
+        ")\n",
+        "\n",
+        "print(\"Processed datasets saved successfully.\")\n",
+        "\n",
+        "files.download(\"customer_shopping_cleaned.csv\")"
+      ]
+    }
+  ]
+}
+
